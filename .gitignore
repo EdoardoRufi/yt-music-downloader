@@ -1,0 +1,15 @@
+# Secrets / local config
+.env
+cookies.txt
+*.cookies.txt
+
+# Local state (sync JSON, timing reports)
+state/
+
+# Downloaded music
+downloads/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
