@@ -28,17 +28,9 @@ def _int(name: str, default: int) -> int:
         raise SystemExit(f"[config] {name} must be an integer, got '{raw}'")
 
 
-def _bool(name: str, default: bool) -> bool:
-    raw = os.getenv(name, "").strip().lower()
-    if not raw:
-        return default
-    return raw in ("1", "true", "yes", "y", "on")
-
-
-def _list(name: str, default: str = "") -> tuple[str, ...]:
+def _list(name: str) -> tuple[str, ...]:
     """Comma-separated list, e.g. "PLabc, PLdef" -> ("PLabc", "PLdef")."""
-    raw = os.getenv(name)
-    raw = default if raw is None else raw
+    raw = os.getenv(name, "")
     return tuple(item.strip() for item in raw.split(",") if item.strip())
 
 
@@ -51,10 +43,7 @@ class Settings:
     sleep_min: int
     sleep_max: int
     ffmpeg_location: str | None
-    include_liked: bool
-    include_playlists: tuple[str, ...]  # if not empty, ONLY these playlist ids are used
-    exclude_playlists: tuple[str, ...]
-    extra_playlists: tuple[str, ...]  # playlist ids or URLs not in your library
+    playlists: tuple[str, ...]  # playlist ids or URLs to download
 
 
 def load_settings() -> Settings:
@@ -69,8 +58,5 @@ def load_settings() -> Settings:
         sleep_min=sleep_min,
         sleep_max=sleep_max,
         ffmpeg_location=os.getenv("FFMPEG_LOCATION", "").strip() or None,
-        include_liked=_bool("INCLUDE_LIKED", True),
-        include_playlists=_list("INCLUDE_PLAYLISTS"),
-        exclude_playlists=_list("EXCLUDE_PLAYLISTS", "WL"),  # WL = Watch later
-        extra_playlists=_list("EXTRA_PLAYLISTS"),
+        playlists=_list("PLAYLISTS"),
     )

@@ -151,7 +151,7 @@ def _flat_opts(settings: Settings) -> dict:
 
 
 def list_my_playlists(settings: Settings) -> list[Playlist]:
-    """Playlists of the logged-in account, filtered according to .env (tracks not fetched)."""
+    """All playlists of the logged-in account plus Liked videos (tracks not fetched)."""
     with yt_dlp.YoutubeDL(_flat_opts(settings)) as ydl:
         try:
             info = ydl.extract_info(FEED_PLAYLISTS_URL, download=False)
@@ -181,18 +181,31 @@ def list_my_playlists(settings: Settings) -> list[Playlist]:
             "cookies are not logged in / expired (README, step 2)."
         )
 
-    if settings.include_liked and LIKED_PLAYLIST_ID not in playlists:
-        playlists[LIKED_PLAYLIST_ID] = Playlist(
-            id=LIKED_PLAYLIST_ID, title="Liked videos", url=playlist_url(LIKED_PLAYLIST_ID)
-        )
-    for extra in settings.extra_playlists:
-        pl_id = playlist_id_from_url(playlist_url(extra)) or extra
-        playlists.setdefault(pl_id, Playlist(id=pl_id, title=pl_id, url=playlist_url(extra)))
+    playlists.setdefault(
+        LIKED_PLAYLIST_ID,
+        Playlist(id=LIKED_PLAYLIST_ID, title="Liked videos", url=playlist_url(LIKED_PLAYLIST_ID)),
+    )
+    return list(playlists.values())
 
-    selected = list(playlists.values())
-    if settings.include_playlists:
-        selected = [p for p in selected if p.id in settings.include_playlists]
-    return [p for p in selected if p.id not in settings.exclude_playlists]
+
+def selected_playlists(settings: Settings) -> list[Playlist]:
+    """Playlists listed in PLAYLISTS (.env), in that order. Exits if the list is empty.
+
+    Titles are just the ids until fetch_tracks() fills them in.
+    """
+    if not settings.playlists:
+        raise SystemExit(
+            "[error] No playlists selected: PLAYLISTS in .env is empty.\n"
+            "Run 'python step2_list_playlists.py' to see your playlist ids, then set e.g.\n"
+            "PLAYLISTS=PLxxxxxxxxxxxxxxxx, LL"
+        )
+    playlists: dict[str, Playlist] = {}
+    for item in settings.playlists:
+        pl_id = playlist_id_from_url(playlist_url(item))
+        if not pl_id:
+            raise SystemExit(f"[error] PLAYLISTS: '{item}' is not a playlist id or URL.")
+        playlists.setdefault(pl_id, Playlist(id=pl_id, title=pl_id, url=playlist_url(pl_id)))
+    return list(playlists.values())
 
 
 def fetch_tracks(settings: Settings, playlist: Playlist) -> Playlist:
