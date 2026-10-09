@@ -284,15 +284,15 @@ def playlists_from_ids(items: tuple[str, ...], var_name: str) -> list[Playlist]:
 _CHANNEL_PREFIXES = ("channel", "c", "user")
 
 
-def artist_releases_url(artist_url: str) -> str:
-    """Artist link (YouTube or YouTube Music, any tab) -> its "Releases" tab URL."""
+def artist_channel_url(artist_url: str) -> str:
+    """Artist link (YouTube or YouTube Music, any tab) -> channel URL without tab."""
     parsed = urlparse(artist_url.strip())
     parts = [p for p in parsed.path.split("/") if p]
     if parsed.netloc.endswith("youtube.com") and parts:
         if parts[0].startswith("@"):
-            return f"https://www.youtube.com/{parts[0]}/releases"
+            return f"https://www.youtube.com/{parts[0]}"
         if parts[0] in _CHANNEL_PREFIXES and len(parts) >= 2:
-            return f"https://www.youtube.com/{parts[0]}/{parts[1]}/releases"
+            return f"https://www.youtube.com/{parts[0]}/{parts[1]}"
     raise SystemExit(
         f"[error] '{artist_url}' is not an artist link. Use the artist page URL, e.g.\n"
         "  https://music.youtube.com/channel/UCxxxxxxxxxxxxxxxxxxxxxx\n"
@@ -300,30 +300,58 @@ def artist_releases_url(artist_url: str) -> str:
     )
 
 
-def list_artist_releases(settings: Settings, artist_url: str) -> tuple[str, list[Playlist]]:
-    """(artist name, albums/EPs/singles) from the artist's Releases tab (tracks not fetched)."""
-    url = artist_releases_url(artist_url)
-    with yt_dlp.YoutubeDL(_flat_opts(settings)) as ydl:
-        try:
-            info = ydl.extract_info(url, download=False)
-        except yt_dlp.utils.DownloadError as e:
-            raise SystemExit(
-                f"[error] Could not read the releases of {url}: {e}\n"
-                "Make sure the link points to an artist page (it must have a 'Releases' tab)."
-            )
-    info = info or {}
+# Official albums/EPs/singles are auto-generated playlists whose id starts with this.
+ALBUM_PLAYLIST_PREFIX = "OLAK5uy_"
 
-    name = info.get("channel") or info.get("uploader") or info.get("title") or "Unknown artist"
+# Where a channel may list its releases, best first. Not every channel has a
+# "releases" tab: band-run and "- Topic" channels often show albums in the others.
+_RELEASE_TABS = ("releases", "playlists", "featured")
+
+
+def list_artist_releases(settings: Settings, artist_url: str) -> tuple[str, list[Playlist]]:
+    """(artist name, albums/EPs/singles) of an artist channel (tracks not fetched).
+
+    Tries the tabs in _RELEASE_TABS and keeps only official album playlists
+    (OLAK5uy_...), so that playlists made by hand on the channel are left out.
+    """
+    base = artist_channel_url(artist_url)
+    name: str | None = None
+    releases: dict[str, Playlist] = {}
+    attempts: list[str] = []
+
+    with yt_dlp.YoutubeDL(_flat_opts(settings)) as ydl:
+        for tab in _RELEASE_TABS:
+            url = f"{base}/{tab}"
+            try:
+                info = ydl.extract_info(url, download=False) or {}
+            except yt_dlp.utils.DownloadError as e:
+                attempts.append(f"  {tab}: {str(e).removeprefix('ERROR: ')}")
+                continue
+
+            name = name or info.get("channel") or info.get("uploader")
+            found = 0
+            for entry in info.get("entries") or []:
+                pl_id = entry and (playlist_id_from_url(entry.get("url") or "") or entry.get("id"))
+                if pl_id and pl_id.startswith(ALBUM_PLAYLIST_PREFIX):
+                    found += 1
+                    releases.setdefault(
+                        pl_id, Playlist(id=pl_id, title=entry.get("title") or pl_id, url=playlist_url(pl_id))
+                    )
+            attempts.append(f"  {tab}: {found} albums/EPs/singles")
+            if releases:
+                break  # the first tab that lists releases is the most complete one
+
+    if not releases:
+        raise SystemExit(
+            f"[error] No albums/EPs found on {base}. Tabs tried:\n" + "\n".join(attempts) + "\n"
+            "This is probably not the artist's music channel. Open the artist on "
+            "https://music.youtube.com\n(search, then click the artist name) and use that "
+            "page's link (music.youtube.com/channel/UC...)."
+        )
+
+    name = name or "Unknown artist"
     for suffix in (" - Releases", " - Topic"):
         name = name.removesuffix(suffix)
-
-    releases: dict[str, Playlist] = {}
-    for entry in info.get("entries") or []:
-        pl_id = entry and (playlist_id_from_url(entry.get("url") or "") or entry.get("id"))
-        if pl_id:
-            releases.setdefault(
-                pl_id, Playlist(id=pl_id, title=entry.get("title") or pl_id, url=playlist_url(pl_id))
-            )
     return name, list(releases.values())
 
 

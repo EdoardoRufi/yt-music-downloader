@@ -403,7 +403,9 @@ Open the artist page and copy the address from the browser. Both forms work:
 - YouTube: `https://www.youtube.com/@ArtistName` or `https://www.youtube.com/channel/UC...`
 
 > Use the **artist** page, the one with the *Albums* / *Singles & EPs* sections on YouTube
-> Music or the *Releases* tab on YouTube. A fan or label channel won't work.
+> Music. **The YouTube Music link is the most reliable.** Many bands' own YouTube channels
+> have no *Releases* tab: the script then also looks in the *Playlists* and *Home* tabs, keeping
+> only official album playlists (`OLAK5uy_...`). A fan or label channel won't work.
 
 ### 2. List the releases
 
@@ -472,7 +474,7 @@ python artist_download.py "https://music.youtube.com/channel/UCxxxxxxxxxxxxxxxxx
 | A playlist shows `ERROR` | Usually deleted, or private and owned by someone else: remove it from `PLAYLISTS`. |
 | `No playlists selected: PLAYLISTS in .env is empty` | Set `PLAYLISTS` in `.env` (step 2.3). |
 | `No albums/EPs selected: ARTIST_RELEASES in .env is empty` | Run `artist_list_releases.py` and set `ARTIST_RELEASES` in `.env`. |
-| `Could not read the releases` / `is not an artist link` | Use the artist's own page (YouTube Music artist page, or the YouTube channel with a *Releases* tab), not a video or a fan channel. Update yt-dlp (step 0.6). |
+| `No albums/EPs found` / `is not an artist link` | The script looks in the channel's *Releases*, *Playlists* and *Home* tabs and prints what it found in each. If all are empty, the link is the band's upload channel rather than its music channel: open the artist on <https://music.youtube.com> (search → click the artist name) and use that link. Update yt-dlp (step 0.6). |
 | Many tracks `FAILED` in a row in step 3 | Probably rate-limited: stop (`Ctrl+C`), wait an hour, raise `SLEEP_MIN`/`SLEEP_MAX`, re-export the cookies, then resume. |
 | A track fails with *"Video unavailable"* / *"not available in your country"* | Nothing to do: it is listed in the report and skipped. |
 | Step 4 wants to re-download a whole playlist you already have | The folder name differs (playlist renamed, `--dest` changed, or `state\last_sync.json` deleted). Rename the folder to the playlist's current title and run `--dry-run` again. |
