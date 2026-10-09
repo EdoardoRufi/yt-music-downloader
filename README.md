@@ -13,7 +13,7 @@ with metadata and cover art, one folder per playlist. Built on
 | 1 | `step1_single.py` | Download one hardcoded song | ready |
 | 2 | `step2_list_playlists.py` | Connect your account, list playlists + Liked | ready |
 | 3 | `step3_download_all.py` | Download every playlist into its own folder, with timings | ready |
-| 4 | `step4_sync.py` | Incremental sync (only if step 3 is slow) | to be decided |
+| 4 | `step4_sync.py` | Incremental sync: download what's new, delete what's gone | ready |
 
 All commands below are for **Windows PowerShell**, run from the project folder.
 
@@ -310,6 +310,73 @@ Otherwise step 4 (incremental sync) is worth building.
 
 ---
 
+## Step 4 – Sync (download only what changed)
+
+Keeps the local folders in line with your playlists without downloading everything again.
+For each playlist in `PLAYLISTS`:
+
+- **folder doesn't exist yet** → the whole playlist is downloaded (like step 3);
+- **folder exists** → only the differences are applied:
+  - tracks **added** to the playlist on YouTube are downloaded;
+  - tracks **removed** from the playlist are deleted from the folder;
+  - everything else is left untouched.
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+python step4_sync.py --dry-run    # first, look at what would change
+python step4_sync.py              # then sync (asks before deleting anything)
+```
+
+Example of the plan it prints:
+
+```
+[1/2] Reading playlist PLxxxxxxxxxxxxxxxx ...
+  'Road trip' (86 tracks)
+    3 to download, 1 to delete, 81 unchanged, 2 unavailable
+      + New song A
+      + New song B
+      + New song C
+      - Old song [zzzzzzzzzzz].mp3
+
+Plan: 3 to download, 1 to delete, 0 folders to rename.
+
+Delete 1 local files? [y/N]
+```
+
+Options:
+
+| Command | Effect |
+|---------|--------|
+| `--dry-run` | Only show the plan, change nothing |
+| `--yes` | Delete without asking (e.g. for a scheduled task) |
+| `--only PLxxxx` | Only this playlist (must be in `PLAYLISTS`). Repeatable |
+| `--dest D:\Music` | Sync another folder instead of `DOWNLOAD_DIR` |
+
+If you answer **N** to the delete question, downloads and renames still happen and nothing is deleted.
+
+### How it knows what changed
+
+- **No database:** the folder contents are the truth. Every MP3 has its YouTube video id in its
+  name (`Title [id].mp3`), so the script compares those ids with the playlist's current ids.
+  You can therefore run step 4 directly on a folder created by step 3.
+- `state\last_sync.json` (in the project folder, ignored by git) remembers which folder belongs to
+  which playlist, for each destination. If you **rename a playlist** on YouTube, its folder is
+  renamed instead of downloaded again. If the file is lost, nothing breaks: a renamed playlist
+  would just be downloaded into a new folder.
+
+### Safety rules
+
+- Tracks that are still in the playlist but became **private/deleted** on YouTube are **kept**
+  locally, since you couldn't download them again.
+- If YouTube returns an **empty** playlist (or an error) while the folder has tracks, **nothing is
+  deleted** for that playlist.
+- Folders of playlists you removed from `PLAYLISTS` are **never touched**: delete them by hand.
+- Only MP3 files with an `[id]` in their name are managed. Other files you put in the folders are ignored.
+- Failed downloads are retried automatically at the next sync. `Ctrl+C` is safe: run it again
+  to finish.
+
+---
+
 ## Troubleshooting
 
 | Symptom | Fix |
@@ -325,6 +392,7 @@ Otherwise step 4 (incremental sync) is worth building.
 | `No playlists selected: PLAYLISTS in .env is empty` | Set `PLAYLISTS` in `.env` (step 2.3). |
 | Many tracks `FAILED` in a row in step 3 | Probably rate-limited: stop (`Ctrl+C`), wait an hour, raise `SLEEP_MIN`/`SLEEP_MAX`, re-export the cookies, then resume. |
 | A track fails with *"Video unavailable"* / *"not available in your country"* | Nothing to do: it is listed in the report and skipped. |
+| Step 4 wants to re-download a whole playlist you already have | The folder name differs (playlist renamed, `--dest` changed, or `state\last_sync.json` deleted). Rename the folder to the playlist's current title and run `--dry-run` again. |
 | `ModuleNotFoundError: No module named 'yt_dlp'` | The virtual environment is not active: `.\.venv\Scripts\Activate.ps1`. |
 | `running scripts is disabled on this system` | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` |
 | `.env` changes are ignored | The file must be named exactly `.env` (not `.env.txt`): check with `dir -Force`. |

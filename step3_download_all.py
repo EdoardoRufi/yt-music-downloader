@@ -19,103 +19,12 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-import yt_dlp
-
-from config import STATE_DIR, Settings, load_settings
-from ytcommon import (
-    CollectingLogger,
-    Playlist,
-    build_ydl_opts,
-    check_dependencies,
-    existing_tracks,
-    fetch_tracks,
-    is_unavailable,
-    require_cookies,
-    safe_folder_name,
-    selected_playlists,
-    track_url,
-)
+from config import STATE_DIR, load_settings
+from downloader import FolderNamer, download_playlist, fmt_duration, new_stats
+from ytcommon import check_dependencies, fetch_tracks, require_cookies, selected_playlists
 
 # Above this total, re-downloading everything every time is not worth it: use step 4.
 FULL_REDOWNLOAD_MAX_SECONDS = 20 * 60
-
-
-def fmt_duration(seconds: float) -> str:
-    seconds = int(round(seconds))
-    hours, rest = divmod(seconds, 3600)
-    minutes, secs = divmod(rest, 60)
-    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
-
-
-def new_stats(playlist: Playlist, folder: Path | None = None) -> dict:
-    return {
-        "id": playlist.id,
-        "title": playlist.title,
-        "folder": str(folder) if folder else None,
-        "tracks": len(playlist.tracks),
-        "downloaded": 0,
-        "already_present": 0,
-        "unavailable": 0,
-        "failed": 0,
-        "seconds": 0.0,
-        "error": playlist.error,
-        "failures": [],
-    }
-
-
-def download_playlist(
-    settings: Settings, playlist: Playlist, folder: Path, limit: int | None, label: str, stats: dict
-) -> None:
-    """Download the playlist's tracks into folder, updating stats in place.
-
-    stats is filled as we go so that it is still valid after a Ctrl+C.
-    """
-    folder.mkdir(parents=True, exist_ok=True)
-    present = existing_tracks(folder)
-    tracks = playlist.tracks[:limit] if limit else playlist.tracks
-
-    logger = CollectingLogger()
-    opts = build_ydl_opts(settings, folder)
-    opts.update({"logger": logger, "noplaylist": True, "noprogress": True})
-
-    start = time.perf_counter()
-    try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            for n, entry in enumerate(tracks, 1):
-                video_id, title = entry["id"], entry.get("title") or entry["id"]
-                prefix = f"  {label}[{n}/{len(tracks)}]"
-                if is_unavailable(entry):
-                    stats["unavailable"] += 1
-                    print(f"{prefix} skip (unavailable): {title}")
-                    continue
-                if video_id in present:
-                    stats["already_present"] += 1
-                    print(f"{prefix} already present: {title}")
-                    continue
-
-                print(f"{prefix} {title} ...", end="", flush=True)
-                logger.last_error = None
-                track_start = time.perf_counter()
-                try:
-                    ydl.extract_info(track_url(video_id), download=True)
-                except yt_dlp.utils.DownloadError as e:  # normally swallowed by ignoreerrors
-                    logger.last_error = str(e)
-                took = time.perf_counter() - track_start
-
-                # Success = the MP3 really exists (post-processing errors don't raise).
-                mp3 = existing_tracks(folder).get(video_id)
-                if mp3:
-                    present[video_id] = mp3
-                    stats["downloaded"] += 1
-                    print(f" ok ({took:.1f}s)")
-                else:
-                    stats["failed"] += 1
-                    reason = logger.last_error or "MP3 not created"
-                    stats["failures"].append({"id": video_id, "title": title, "error": reason})
-                    print(f" FAILED ({took:.1f}s)")
-                    print(f"      {reason}")
-    finally:
-        stats["seconds"] = round(time.perf_counter() - start, 1)
 
 
 def print_report(results: list[dict], total_seconds: float) -> None:
@@ -182,7 +91,7 @@ def main() -> None:
     print(f"Playlists:   {len(playlists)}\n")
 
     results: list[dict] = []
-    used_folders: set[str] = set()
+    namer = FolderNamer()
     total_start = time.perf_counter()
     try:
         for i, playlist in enumerate(playlists, 1):
@@ -194,16 +103,12 @@ def main() -> None:
                 results.append(new_stats(playlist))
                 continue
 
-            folder_name = safe_folder_name(playlist.title, playlist.id)
-            if folder_name.lower() in used_folders:  # two playlists with the same title
-                folder_name = f"{folder_name} [{playlist.id}]"
-            used_folders.add(folder_name.lower())
-            folder = settings.download_dir / folder_name
+            folder = settings.download_dir / namer.name_for(playlist)
 
             print(f"  '{playlist.title}': {len(playlist.tracks)} tracks -> {folder}")
             stats = new_stats(playlist, folder)
             results.append(stats)
-            download_playlist(settings, playlist, folder, args.limit, label, stats)
+            download_playlist(settings, playlist, folder, label, stats, limit=args.limit)
             print(f"  Done in {fmt_duration(stats['seconds'])}\n")
     except KeyboardInterrupt:
         print("\n\nInterrupted. Run the script again to resume: existing MP3s are skipped.")
