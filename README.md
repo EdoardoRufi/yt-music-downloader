@@ -14,6 +14,7 @@ with metadata and cover art, one folder per playlist. Built on
 | 2 | `step2_list_playlists.py` | Connect your account, list playlists + Liked | ready |
 | 3 | `step3_download_all.py` | Download every playlist into its own folder, with timings | ready |
 | 4 | `step4_sync.py` | Incremental sync: download what's new, delete what's gone | ready |
+| Artist | `artist_list_releases.py`, `artist_download.py` | List an artist's albums/EPs, download the selected ones | ready |
 
 All commands below are for **Windows PowerShell**, run from the project folder.
 
@@ -104,6 +105,7 @@ notepad .env
 | `AUDIO_QUALITY` | `192` | MP3 bitrate in kbps |
 | `SLEEP_MIN` / `SLEEP_MAX` | `2` / `6` | Random pause in seconds between downloads |
 | `FFMPEG_LOCATION` | *(empty)* | Folder containing `ffmpeg.exe`, only if it is not on PATH |
+| `ARTIST_RELEASES` | *(empty)* | **Required by `artist_download.py`.** Comma-separated album/EP ids (`OLAK5uy_...`) or URLs. Get them with `artist_list_releases.py` |
 | `PLAYLISTS` | *(empty)* | **Required from step 3 on.** Comma-separated ids (or URLs) of the playlists to download. Get them with step 2. `LL` = Liked videos, `LM` = YouTube Music Liked music |
 
 > **OneDrive users:** if this project folder is inside OneDrive, set `DOWNLOAD_DIR` to a
@@ -377,6 +379,85 @@ If you answer **N** to the delete question, downloads and renames still happen a
 
 ---
 
+## Artists – download albums and EPs
+
+Two scripts to download whole releases of an artist, each into its own folder:
+
+```
+downloads\
+└── Artist Name\
+    ├── First Album\
+    │   ├── 01 - Song A [xxxxxxxxxxx].mp3
+    │   └── 02 - Song B [yyyyyyyyyyy].mp3
+    └── Some EP\
+        └── ...
+```
+
+Cookies are **not required** here (releases are public), but they are used if `YT_COOKIES` points to a valid file.
+
+### 1. Find the artist link
+
+Open the artist page and copy the address from the browser. Both forms work:
+
+- YouTube Music: `https://music.youtube.com/channel/UCxxxxxxxxxxxxxxxxxxxxxx`
+- YouTube: `https://www.youtube.com/@ArtistName` or `https://www.youtube.com/channel/UC...`
+
+> Use the **artist** page, the one with the *Albums* / *Singles & EPs* sections on YouTube
+> Music or the *Releases* tab on YouTube. A fan or label channel won't work.
+
+### 2. List the releases
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+python artist_list_releases.py "https://music.youtube.com/channel/UCxxxxxxxxxxxxxxxxxxxxxx"
+```
+
+```
+Artist: Artist Name
+
+  #  Sel  Type    Title                                               Tracks  Id
+------------------------------------------------------------------------------------------------------------------------
+  1       Album   First Album                                             12  OLAK5uy_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  2   *   EP      Some EP                                                  5  OLAK5uy_yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+  3       Single  A Single                                                 1  OLAK5uy_zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz
+------------------------------------------------------------------------------------------------------------------------
+3 releases - read in 6.2s
+Type is a guess from the track count: 1-3 Single, 4-6 EP, 7+ Album.
+```
+
+YouTube doesn't say whether a release is an album, an EP or a single, so **Type** is only a
+guess from the number of tracks. `--fast` skips the track counts and only shows titles and ids.
+
+### 3. Choose what to download
+
+Copy the ids you want into `ARTIST_RELEASES` in `.env`, separated by commas:
+
+```
+ARTIST_RELEASES=OLAK5uy_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx, OLAK5uy_yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+```
+
+Run the list again: the selected releases are marked with `*`. If `ARTIST_RELEASES` is
+empty, `artist_download.py` stops with an error.
+
+### 4. Download
+
+```powershell
+python artist_download.py "https://music.youtube.com/channel/UCxxxxxxxxxxxxxxxxxxxxxx"
+```
+
+| Option | Effect |
+|--------|--------|
+| `--dest D:\Music\Artists` | Create the artist folder there instead of in `DOWNLOAD_DIR` |
+| `--only OLAK5uy_xxxx` | Only this release (must be in `ARTIST_RELEASES`). Repeatable |
+
+- Files are numbered in album order (`01 - ...`). If YouTube doesn't provide them, album, artist
+  and track number are also written into the MP3 tags, so phone players group them correctly.
+- Already downloaded tracks are skipped: `Ctrl+C` and run again to resume or retry failures.
+- `ARTIST_RELEASES` holds the releases of **one artist at a time**: when you move on to another
+  artist, replace the ids.
+
+---
+
 ## Troubleshooting
 
 | Symptom | Fix |
@@ -390,6 +471,8 @@ If you answer **N** to the delete question, downloads and renames still happen a
 | `Could not read your playlists` / no playlists found | Cookies expired or exported while logged out: export them again (step 2.1). |
 | A playlist shows `ERROR` | Usually deleted, or private and owned by someone else: remove it from `PLAYLISTS`. |
 | `No playlists selected: PLAYLISTS in .env is empty` | Set `PLAYLISTS` in `.env` (step 2.3). |
+| `No albums/EPs selected: ARTIST_RELEASES in .env is empty` | Run `artist_list_releases.py` and set `ARTIST_RELEASES` in `.env`. |
+| `Could not read the releases` / `is not an artist link` | Use the artist's own page (YouTube Music artist page, or the YouTube channel with a *Releases* tab), not a video or a fan channel. Update yt-dlp (step 0.6). |
 | Many tracks `FAILED` in a row in step 3 | Probably rate-limited: stop (`Ctrl+C`), wait an hour, raise `SLEEP_MIN`/`SLEEP_MAX`, re-export the cookies, then resume. |
 | A track fails with *"Video unavailable"* / *"not available in your country"* | Nothing to do: it is listed in the report and skipped. |
 | Step 4 wants to re-download a whole playlist you already have | The folder name differs (playlist renamed, `--dest` changed, or `state\last_sync.json` deleted). Rename the folder to the playlist's current title and run `--dry-run` again. |

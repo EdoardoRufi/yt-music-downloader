@@ -44,6 +44,7 @@ class Settings:
     sleep_max: int
     ffmpeg_location: str | None
     playlists: tuple[str, ...]  # playlist ids or URLs to download
+    artist_releases: tuple[str, ...]  # album/EP ids (OLAK5uy_...) or URLs to download
 
 
 def load_settings() -> Settings:
@@ -59,4 +60,5 @@ def load_settings() -> Settings:
         sleep_max=sleep_max,
         ffmpeg_location=os.getenv("FFMPEG_LOCATION", "").strip() or None,
         playlists=_list("PLAYLISTS"),
+        artist_releases=_list("ARTIST_RELEASES"),
     )

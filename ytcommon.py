@@ -14,6 +14,8 @@ from config import Settings
 # Video id in brackets lets later steps map files back to YouTube ids
 # without relying on any database.
 OUTPUT_TEMPLATE = "%(title)s [%(id)s].%(ext)s"
+# Albums: "01 - Title [id].mp3". track_prefix is passed by us (see downloader.py).
+ALBUM_OUTPUT_TEMPLATE = "%(track_prefix)s%(title)s [%(id)s].%(ext)s"
 
 # Your library: playlists you created or saved, public and private (needs cookies).
 FEED_PLAYLISTS_URL = "https://www.youtube.com/feed/playlists"
@@ -253,13 +255,85 @@ def selected_playlists(settings: Settings) -> list[Playlist]:
             "Run 'python step2_list_playlists.py' to see your playlist ids, then set e.g.\n"
             "PLAYLISTS=PLxxxxxxxxxxxxxxxx, LL"
         )
+    return playlists_from_ids(settings.playlists, "PLAYLISTS")
+
+
+def selected_releases(settings: Settings) -> list[Playlist]:
+    """Albums/EPs listed in ARTIST_RELEASES (.env), in that order. Exits if the list is empty."""
+    if not settings.artist_releases:
+        raise SystemExit(
+            "[error] No albums/EPs selected: ARTIST_RELEASES in .env is empty.\n"
+            "Run 'python artist_list_releases.py <artist link>' to see the release ids, then set e.g.\n"
+            "ARTIST_RELEASES=OLAK5uy_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx, OLAK5uy_yyyy..."
+        )
+    return playlists_from_ids(settings.artist_releases, "ARTIST_RELEASES")
+
+
+def playlists_from_ids(items: tuple[str, ...], var_name: str) -> list[Playlist]:
+    """Playlist objects from ids/URLs, in order and without duplicates."""
     playlists: dict[str, Playlist] = {}
-    for item in settings.playlists:
+    for item in items:
         pl_id = playlist_id_from_url(playlist_url(item))
         if not pl_id:
-            raise SystemExit(f"[error] PLAYLISTS: '{item}' is not a playlist id or URL.")
+            raise SystemExit(f"[error] {var_name}: '{item}' is not a playlist id or URL.")
         playlists.setdefault(pl_id, Playlist(id=pl_id, title=pl_id, url=playlist_url(pl_id)))
     return list(playlists.values())
+
+
+# Channel URL forms: /channel/UC..., /@handle, /c/name, /user/name (+ optional tab).
+_CHANNEL_PREFIXES = ("channel", "c", "user")
+
+
+def artist_releases_url(artist_url: str) -> str:
+    """Artist link (YouTube or YouTube Music, any tab) -> its "Releases" tab URL."""
+    parsed = urlparse(artist_url.strip())
+    parts = [p for p in parsed.path.split("/") if p]
+    if parsed.netloc.endswith("youtube.com") and parts:
+        if parts[0].startswith("@"):
+            return f"https://www.youtube.com/{parts[0]}/releases"
+        if parts[0] in _CHANNEL_PREFIXES and len(parts) >= 2:
+            return f"https://www.youtube.com/{parts[0]}/{parts[1]}/releases"
+    raise SystemExit(
+        f"[error] '{artist_url}' is not an artist link. Use the artist page URL, e.g.\n"
+        "  https://music.youtube.com/channel/UCxxxxxxxxxxxxxxxxxxxxxx\n"
+        "  https://www.youtube.com/@ArtistName"
+    )
+
+
+def list_artist_releases(settings: Settings, artist_url: str) -> tuple[str, list[Playlist]]:
+    """(artist name, albums/EPs/singles) from the artist's Releases tab (tracks not fetched)."""
+    url = artist_releases_url(artist_url)
+    with yt_dlp.YoutubeDL(_flat_opts(settings)) as ydl:
+        try:
+            info = ydl.extract_info(url, download=False)
+        except yt_dlp.utils.DownloadError as e:
+            raise SystemExit(
+                f"[error] Could not read the releases of {url}: {e}\n"
+                "Make sure the link points to an artist page (it must have a 'Releases' tab)."
+            )
+    info = info or {}
+
+    name = info.get("channel") or info.get("uploader") or info.get("title") or "Unknown artist"
+    for suffix in (" - Releases", " - Topic"):
+        name = name.removesuffix(suffix)
+
+    releases: dict[str, Playlist] = {}
+    for entry in info.get("entries") or []:
+        pl_id = entry and (playlist_id_from_url(entry.get("url") or "") or entry.get("id"))
+        if pl_id:
+            releases.setdefault(
+                pl_id, Playlist(id=pl_id, title=entry.get("title") or pl_id, url=playlist_url(pl_id))
+            )
+    return name, list(releases.values())
+
+
+def release_kind(track_count: int) -> str:
+    """YouTube doesn't say if a release is an album, an EP or a single: guess from its size."""
+    if track_count <= 3:
+        return "Single"
+    if track_count <= 6:
+        return "EP"
+    return "Album"
 
 
 def fetch_tracks(settings: Settings, playlist: Playlist) -> Playlist:
