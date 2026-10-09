@@ -12,7 +12,7 @@ with metadata and cover art, one folder per playlist. Built on
 | 0 | – | Installation | ready |
 | 1 | `step1_single.py` | Download one hardcoded song | ready |
 | 2 | `step2_list_playlists.py` | Connect your account, list playlists + Liked | ready |
-| 3 | `step3_download_all.py` | Download every playlist into its own folder, with timings | coming next |
+| 3 | `step3_download_all.py` | Download every playlist into its own folder, with timings | ready |
 | 4 | `step4_sync.py` | Incremental sync (only if step 3 is slow) | to be decided |
 
 All commands below are for **Windows PowerShell**, run from the project folder.
@@ -245,6 +245,71 @@ Notes:
 
 ---
 
+## Step 3 – Download all the selected playlists
+
+Requires `PLAYLISTS` in `.env` (step 2.3) and valid cookies (step 2.1).
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+python step3_download_all.py --limit 3     # quick test: first 3 tracks of each playlist
+python step3_download_all.py               # everything
+```
+
+Each playlist gets its own sub-folder of `DOWNLOAD_DIR`, named after the playlist:
+
+```
+downloads\
+├── Road trip\
+│   ├── Song A [xxxxxxxxxxx].mp3
+│   └── Song B [yyyyyyyyyyy].mp3
+└── Liked videos\
+    └── ...
+```
+
+Options:
+
+| Command | Effect |
+|---------|--------|
+| `--limit N` | Download at most the first N tracks of each playlist (quick test) |
+| `--only PLxxxx` | Only this playlist (must be in `PLAYLISTS`). Repeatable: `--only PLaaa --only LL` |
+| `--dest D:\Music\2026-10` | Download into another folder instead of `DOWNLOAD_DIR` |
+
+**Interrupting and resuming:** press `Ctrl+C` at any time. Run the same command again and the
+MP3s already in the folder (matched by the video id in the file name) are skipped.
+Private or deleted videos are skipped without trying.
+
+### Timing report
+
+Each track prints its download time. At the end you get a summary:
+
+```
+Playlist                          Tracks    New    Had  Unav.  Fail      Time  s/track
+------------------------------------------------------------------------------------------
+Road trip                             84     82      0      2     0     14:21     10.5
+Liked videos                         412    401      0      5     6   1:12:40     10.9
+------------------------------------------------------------------------------------------
+New = downloaded now, Had = already in the folder, Unav. = private/deleted on YouTube
+
+Total: 483 tracks downloaded in 1:27:01
+Average: 10.8s per track (including the anti-bot pause)
+Estimated full download of all 489 tracks: 1:28:03
+=> Too slow to re-download everything each time: the step 4 sync is worth it.
+```
+
+The same data, including the list of failed tracks and their errors, is saved in
+`state\timings_YYYYMMDD_HHMMSS.json`.
+
+The estimate also works after a `--limit` test run: it multiplies the average time per track
+by the number of tracks in all the selected playlists. Most of the time per track is the
+random pause (`SLEEP_MIN`–`SLEEP_MAX`, 4 s on average with the defaults), the rest is download
+and MP3 conversion.
+
+**What to do with the result:** if the full download takes 20 minutes or less, you can simply
+re-download everything into a new folder (`--dest`) whenever you want fresh playlists.
+Otherwise step 4 (incremental sync) is worth building.
+
+---
+
 ## Troubleshooting
 
 | Symptom | Fix |
@@ -258,6 +323,8 @@ Notes:
 | `Could not read your playlists` / no playlists found | Cookies expired or exported while logged out: export them again (step 2.1). |
 | A playlist shows `ERROR` | Usually deleted, or private and owned by someone else: remove it from `PLAYLISTS`. |
 | `No playlists selected: PLAYLISTS in .env is empty` | Set `PLAYLISTS` in `.env` (step 2.3). |
+| Many tracks `FAILED` in a row in step 3 | Probably rate-limited: stop (`Ctrl+C`), wait an hour, raise `SLEEP_MIN`/`SLEEP_MAX`, re-export the cookies, then resume. |
+| A track fails with *"Video unavailable"* / *"not available in your country"* | Nothing to do: it is listed in the report and skipped. |
 | `ModuleNotFoundError: No module named 'yt_dlp'` | The virtual environment is not active: `.\.venv\Scripts\Activate.ps1`. |
 | `running scripts is disabled on this system` | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` |
 | `.env` changes are ignored | The file must be named exactly `.env` (not `.env.txt`): check with `dir -Force`. |

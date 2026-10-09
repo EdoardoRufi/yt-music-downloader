@@ -1,11 +1,13 @@
 """yt-dlp helpers shared by every step."""
 
+import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import yt_dlp
+from yt_dlp.utils import sanitize_filename
 
 from config import Settings
 
@@ -47,6 +49,58 @@ def is_unavailable(entry: dict) -> bool:
     return entry.get("title") in _UNAVAILABLE_TITLES
 
 
+def track_url(video_id: str) -> str:
+    return f"https://www.youtube.com/watch?v={video_id}"
+
+
+# "Some title [dQw4w9WgXcQ].mp3" -> "dQw4w9WgXcQ" (see OUTPUT_TEMPLATE)
+_TRACK_FILE_RE = re.compile(r"\[([A-Za-z0-9_-]{11})\]\.mp3$")
+
+# Names Windows refuses as file/folder names, whatever the extension.
+_WINDOWS_RESERVED = {"CON", "PRN", "AUX", "NUL"} | {f"{p}{i}" for p in ("COM", "LPT") for i in range(1, 10)}
+
+
+def existing_tracks(folder: Path) -> dict[str, Path]:
+    """Video id -> MP3 file, for the MP3s already in a playlist folder."""
+    if not folder.is_dir():
+        return {}
+    tracks = {}
+    for file in folder.glob("*.mp3"):
+        match = _TRACK_FILE_RE.search(file.name)
+        if match:
+            tracks[match.group(1)] = file
+    return tracks
+
+
+def safe_folder_name(title: str, fallback: str) -> str:
+    """Playlist title turned into a valid Windows folder name."""
+    name = sanitize_filename(title).strip().rstrip(". ")
+    if not name:
+        return fallback
+    if name.split(".")[0].upper() in _WINDOWS_RESERVED:
+        name += "_"
+    return name
+
+
+class CollectingLogger:
+    """yt-dlp logger: hides the chatter, prints warnings, remembers the last error."""
+
+    def __init__(self) -> None:
+        self.last_error: str | None = None
+
+    def debug(self, msg: str) -> None:
+        pass
+
+    def info(self, msg: str) -> None:
+        pass
+
+    def warning(self, msg: str) -> None:
+        print(f"      [warning] {msg.removeprefix('WARNING: ')}")
+
+    def error(self, msg: str) -> None:
+        self.last_error = msg.removeprefix("ERROR: ")
+
+
 def check_dependencies(settings: Settings) -> None:
     """Fail fast with a readable message if external tools are missing."""
     ffmpeg_dir = settings.ffmpeg_location
@@ -77,7 +131,7 @@ def build_ydl_opts(
     """Options for downloading audio as MP3 with metadata and embedded cover art."""
     opts: dict = {
         "format": "bestaudio/best",
-        "paths": {"home": str(dest_dir), "temp": str(dest_dir / ".tmp")},
+        "paths": {"home": str(dest_dir)},
         "outtmpl": OUTPUT_TEMPLATE,
         "windowsfilenames": True,
         "writethumbnail": True,
