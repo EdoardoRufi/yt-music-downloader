@@ -1,3 +1,5 @@
 # "default" extra pulls in yt-dlp-ejs (YouTube JS challenge solver), mutagen, certifi, etc.
 yt-dlp[default]>=2025.11.12
 python-dotenv>=1.0
+# Artist discography (albums/EPs/singles) from YouTube Music.
+ytmusicapi>=1.10

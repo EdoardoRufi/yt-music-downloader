@@ -403,9 +403,14 @@ Open the artist page and copy the address from the browser. Both forms work:
 - YouTube: `https://www.youtube.com/@ArtistName` or `https://www.youtube.com/channel/UC...`
 
 > Use the **artist** page, the one with the *Albums* / *Singles & EPs* sections on YouTube
-> Music. **The YouTube Music link is the most reliable.** Many bands' own YouTube channels
-> have no *Releases* tab: the script then also looks in the *Playlists* and *Home* tabs, keeping
-> only official album playlists (`OLAK5uy_...`). A fan or label channel won't work.
+> Music: search the artist on <https://music.youtube.com>, click the artist name, copy the link.
+> **The YouTube Music link is the most reliable.** A fan or label channel won't work.
+
+The discography is read from YouTube Music with [ytmusicapi](https://github.com/sigma67/ytmusicapi),
+already installed by `requirements.txt`. If you installed the requirements before this feature
+existed, run `pip install -r requirements.txt` again. ytmusicapi is needed because many artists
+only have an auto-generated *"- Topic"* channel on YouTube, which has no *Releases* tab that
+yt-dlp could read. The download itself is still done by yt-dlp.
 
 ### 2. List the releases
 
@@ -417,18 +422,18 @@ python artist_list_releases.py "https://music.youtube.com/channel/UCxxxxxxxxxxxx
 ```
 Artist: Artist Name
 
-  #  Sel  Type    Title                                               Tracks  Id
-------------------------------------------------------------------------------------------------------------------------
-  1       Album   First Album                                             12  OLAK5uy_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-  2   *   EP      Some EP                                                  5  OLAK5uy_yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
-  3       Single  A Single                                                 1  OLAK5uy_zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz
-------------------------------------------------------------------------------------------------------------------------
-3 releases - read in 6.2s
-Type is a guess from the track count: 1-3 Single, 4-6 EP, 7+ Album.
+  #  Sel  Type    Year  Title                                          Tracks  Id
+-----------------------------------------------------------------------------------------------------------------------------
+  1       Album   2025  First Album                                        12  OLAK5uy_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  2   *   EP      2024  Some EP                                             4  OLAK5uy_yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+  3       Single  2024  A Single                                            1  OLAK5uy_zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz
+-----------------------------------------------------------------------------------------------------------------------------
+3 releases (1 albums, 1 EPs, 1 singles) - read in 4.1s
 ```
 
-YouTube doesn't say whether a release is an album, an EP or a single, so **Type** is only a
-guess from the number of tracks. `--fast` skips the track counts and only shows titles and ids.
+**Type** (Album / EP / Single) and **Year** come from YouTube Music. Albums come first, then
+singles and EPs, newest first. Live albums and compilations are listed as albums.
+Reading takes about 15 seconds for an artist with 50 releases (one request per release).
 
 ### 3. Choose what to download
 
@@ -474,7 +479,9 @@ python artist_download.py "https://music.youtube.com/channel/UCxxxxxxxxxxxxxxxxx
 | A playlist shows `ERROR` | Usually deleted, or private and owned by someone else: remove it from `PLAYLISTS`. |
 | `No playlists selected: PLAYLISTS in .env is empty` | Set `PLAYLISTS` in `.env` (step 2.3). |
 | `No albums/EPs selected: ARTIST_RELEASES in .env is empty` | Run `artist_list_releases.py` and set `ARTIST_RELEASES` in `.env`. |
-| `No albums/EPs found` / `is not an artist link` | The script looks in the channel's *Releases*, *Playlists* and *Home* tabs and prints what it found in each. If all are empty, the link is the band's upload channel rather than its music channel: open the artist on <https://music.youtube.com> (search → click the artist name) and use that link. Update yt-dlp (step 0.6). |
+| `YouTube Music has no artist page` / `is not an artist link` | The link is not a YouTube Music artist (e.g. a fan, label or upload channel): open the artist on <https://music.youtube.com> (search → click the artist name) and use that link. |
+| `ModuleNotFoundError: No module named 'ytmusicapi'` | `pip install -r requirements.txt` (with the virtual environment active). |
+| Artist scripts suddenly fail on a working link | YouTube Music changed its pages: `pip install -U ytmusicapi`. |
 | Many tracks `FAILED` in a row in step 3 | Probably rate-limited: stop (`Ctrl+C`), wait an hour, raise `SLEEP_MIN`/`SLEEP_MAX`, re-export the cookies, then resume. |
 | A track fails with *"Video unavailable"* / *"not available in your country"* | Nothing to do: it is listed in the report and skipped. |
 | Step 4 wants to re-download a whole playlist you already have | The folder name differs (playlist renamed, `--dest` changed, or `state\last_sync.json` deleted). Rename the folder to the playlist's current title and run `--dry-run` again. |

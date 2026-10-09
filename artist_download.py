@@ -21,13 +21,8 @@ from pathlib import Path
 
 from config import load_settings
 from downloader import FolderNamer, download_playlist, fmt_duration, new_stats
-from ytcommon import (
-    check_dependencies,
-    fetch_tracks,
-    list_artist_releases,
-    safe_folder_name,
-    selected_releases,
-)
+from ytcommon import check_dependencies, fetch_tracks, safe_folder_name, selected_releases
+from ytmusic import list_releases
 
 
 def main() -> None:
@@ -50,9 +45,9 @@ def main() -> None:
         releases = [r for r in releases if r.id in args.only]
     check_dependencies(settings)
 
-    print("Reading the artist's releases...")
-    artist, artist_releases = list_artist_releases(settings, args.artist_url)
-    titles = {r.id: r.title for r in artist_releases}
+    print("Reading the artist's discography from YouTube Music...")
+    artist, artist_releases = list_releases(args.artist_url, wanted_ids={r.id for r in releases})
+    titles = {r.id: r.title for r in artist_releases if r.id}
     not_by_artist = [r.id for r in releases if r.id not in titles]
     if not_by_artist:
         # Still downloaded (it may be a compilation or a collaboration), but worth knowing.
@@ -73,6 +68,8 @@ def main() -> None:
             release.title = titles.get(release.id, release.title)
             print(f"{label} Reading release {release.id} ...")
             fetch_tracks(settings, release)
+            # Album playlists not found in the discography are titled "Album - <title>".
+            release.title = release.title.removeprefix("Album - ")
             if release.error:
                 print(f"  [error] {release.error}\n")
                 results.append(new_stats(release))
