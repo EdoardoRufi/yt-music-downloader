@@ -104,10 +104,7 @@ notepad .env
 | `AUDIO_QUALITY` | `192` | MP3 bitrate in kbps |
 | `SLEEP_MIN` / `SLEEP_MAX` | `2` / `6` | Random pause in seconds between downloads |
 | `FFMPEG_LOCATION` | *(empty)* | Folder containing `ffmpeg.exe`, only if it is not on PATH |
-| `INCLUDE_LIKED` | `true` | Add your *Liked videos* (`LL`) to the playlists |
-| `EXCLUDE_PLAYLISTS` | `WL` | Comma-separated playlist ids to skip (`WL` = Watch later) |
-| `INCLUDE_PLAYLISTS` | *(empty)* | Comma-separated playlist ids: if set, **only** these are used |
-| `EXTRA_PLAYLISTS` | *(empty)* | Comma-separated playlist ids/URLs to add (e.g. `LM` = YouTube Music *Liked music*) |
+| `PLAYLISTS` | *(empty)* | **Required from step 3 on.** Comma-separated ids (or URLs) of the playlists to download. Get them with step 2. `LL` = Liked videos, `LM` = YouTube Music Liked music |
 
 > **OneDrive users:** if this project folder is inside OneDrive, set `DOWNLOAD_DIR` to a
 > folder outside it (e.g. `C:\Music\youtube`), or OneDrive will sync every MP3.
@@ -200,33 +197,51 @@ python step2_list_playlists.py
 ```
 
 The script reads your library (playlists you created or saved, public and private), adds
-*Liked videos*, and counts the tracks in each one. Nothing is downloaded.
+*Liked videos*, and counts the tracks in each one. Nothing is downloaded. The playlists already
+listed in `PLAYLISTS` are marked with `*` in the **Sel** column.
 
 ```
-  #  Title                                          Tracks  Unavail.  Id
--------------------------------------------------------------------------------------
-  1  Road trip                                          84         2  PLxxxxxxxxxxxxxxxx
-  2  Chill (private)                                    31         0  PLyyyyyyyyyyyyyyyy
-  3  Liked videos                                      412         5  LL
--------------------------------------------------------------------------------------
+  #  Sel  Title                                          Tracks  Unavail.  Id
+------------------------------------------------------------------------------------------
+  1   *   Road trip                                          84         2  PLxxxxxxxxxxxxxxxx
+  2       Chill (private)                                    31         0  PLyyyyyyyyyyyyyyyy
+  3   *   Liked videos                                      412         5  LL
+------------------------------------------------------------------------------------------
 3 playlists, 527 tracks (7 private/deleted, will be skipped) - read in 9.8s
+
+2 playlists selected in PLAYLISTS (marked with *).
 ```
 
 Options:
 
 | Command | Effect |
 |---------|--------|
+| `python step2_list_playlists.py --selected` | Only the playlists in `PLAYLISTS` (error if it is empty) |
 | `python step2_list_playlists.py --fast` | Only the list, no track counts (one request) |
 | `python step2_list_playlists.py --json` | JSON output, e.g. `... --json > playlists.json` |
 
 **Check:** one of your **private** playlists and **Liked videos** must be in the list.
 
+### 2.3 Choose the playlists to download
+
+Copy the ids you want from the **Id** column into `PLAYLISTS` in `.env`, separated by commas:
+
+```
+PLAYLISTS=PLxxxxxxxxxxxxxxxx, PLyyyyyyyyyyyyyyyy, LL
+```
+
+Only these playlists are downloaded, in this order. Full playlist URLs work too. If
+`PLAYLISTS` is empty, the download scripts stop with an error. Check your selection with:
+
+```powershell
+python step2_list_playlists.py --selected
+```
+
 Notes:
-- *Liked videos* contains everything you liked, music or not. Likes on YouTube Music are the
-  same likes. To get only songs, try YouTube Music's *Liked music* with `EXTRA_PLAYLISTS=LM`
-  and set `INCLUDE_LIKED=false`.
-- Use the **Id** column for `EXCLUDE_PLAYLISTS` / `INCLUDE_PLAYLISTS` in `.env`, e.g. to
-  skip non-music playlists.
+- *Liked videos* (`LL`) contains everything you liked, music or not. Likes on YouTube Music are
+  the same likes. To get only songs, try YouTube Music's *Liked music* with `LM` in `PLAYLISTS`.
+- Playlists that are not in your library (e.g. someone else's public playlist) work too: put
+  their id in `PLAYLISTS`. They show up at the bottom of the list.
 
 ---
 
@@ -241,7 +256,8 @@ Notes:
 | `Sign in to confirm you're not a bot` | YouTube is throttling your IP: wait a while, or use cookies (step 2). If you already use them, export them again. |
 | `Cookies file not found` | Check `YT_COOKIES` in `.env` and the file name (Explorer may hide the `.txt` extension: `cookies.txt.txt`). |
 | `Could not read your playlists` / no playlists found | Cookies expired or exported while logged out: export them again (step 2.1). |
-| A playlist shows `ERROR` | Usually deleted, or private and owned by someone else: exclude it with `EXCLUDE_PLAYLISTS`. |
+| A playlist shows `ERROR` | Usually deleted, or private and owned by someone else: remove it from `PLAYLISTS`. |
+| `No playlists selected: PLAYLISTS in .env is empty` | Set `PLAYLISTS` in `.env` (step 2.3). |
 | `ModuleNotFoundError: No module named 'yt_dlp'` | The virtual environment is not active: `.\.venv\Scripts\Activate.ps1`. |
 | `running scripts is disabled on this system` | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` |
 | `.env` changes are ignored | The file must be named exactly `.env` (not `.env.txt`): check with `dir -Force`. |
