@@ -1,13 +1,50 @@
 """yt-dlp helpers shared by every step."""
 
 import shutil
+from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
+
+import yt_dlp
 
 from config import Settings
 
 # Video id in brackets lets later steps map files back to YouTube ids
 # without relying on any database.
 OUTPUT_TEMPLATE = "%(title)s [%(id)s].%(ext)s"
+
+# Your library: playlists you created or saved, public and private (needs cookies).
+FEED_PLAYLISTS_URL = "https://www.youtube.com/feed/playlists"
+LIKED_PLAYLIST_ID = "LL"
+
+# Cookies that only exist when you are logged in to a Google account.
+_LOGIN_COOKIES = ("SAPISID", "__Secure-3PAPISID", "LOGIN_INFO")
+
+# Placeholder titles YouTube uses for entries that can't be downloaded.
+_UNAVAILABLE_TITLES = ("[Private video]", "[Deleted video]", "[Unavailable video]")
+
+
+@dataclass
+class Playlist:
+    id: str
+    title: str
+    url: str
+    tracks: list[dict] = field(default_factory=list)  # flat entries: id, title, duration...
+    error: str | None = None
+
+
+def playlist_url(playlist_id_or_url: str) -> str:
+    if playlist_id_or_url.startswith(("http://", "https://")):
+        return playlist_id_or_url
+    return f"https://www.youtube.com/playlist?list={playlist_id_or_url}"
+
+
+def playlist_id_from_url(url: str) -> str | None:
+    return (parse_qs(urlparse(url).query).get("list") or [None])[0]
+
+
+def is_unavailable(entry: dict) -> bool:
+    return entry.get("title") in _UNAVAILABLE_TITLES
 
 
 def check_dependencies(settings: Settings) -> None:
@@ -76,3 +113,98 @@ def final_filepath(info: dict | None) -> Path | None:
         if download.get("filepath"):
             return Path(download["filepath"])
     return Path(info["filepath"]) if info.get("filepath") else None
+
+
+def require_cookies(settings: Settings) -> Path:
+    """Return the cookies file, or exit explaining how to create it."""
+    path = settings.cookies_file
+    if path is None:
+        raise SystemExit(
+            f"[error] Cookies file not found: {settings.cookies_path}\n"
+            "Export it from your browser (see README, step 2) or fix YT_COOKIES in .env."
+        )
+    text = path.read_text(encoding="utf-8", errors="replace")
+    if "youtube.com" not in text:
+        raise SystemExit(
+            f"[error] {path} contains no youtube.com cookies. Export them while on youtube.com."
+        )
+    if not any(name in text for name in _LOGIN_COOKIES):
+        print(
+            "[warning] The cookies file has no login cookies: were you logged in to YouTube "
+            "when you exported it? Private playlists and Liked videos won't be visible."
+        )
+    return path
+
+
+def _flat_opts(settings: Settings) -> dict:
+    """Options to read lists (playlists, tracks) without downloading anything."""
+    opts: dict = {
+        "extract_flat": "in_playlist",
+        "skip_download": True,
+        "quiet": True,
+        "no_warnings": True,
+        "retries": 10,
+    }
+    if settings.cookies_file:
+        opts["cookiefile"] = str(settings.cookies_file)
+    return opts
+
+
+def list_my_playlists(settings: Settings) -> list[Playlist]:
+    """Playlists of the logged-in account, filtered according to .env (tracks not fetched)."""
+    with yt_dlp.YoutubeDL(_flat_opts(settings)) as ydl:
+        try:
+            info = ydl.extract_info(FEED_PLAYLISTS_URL, download=False)
+        except yt_dlp.utils.DownloadError as e:
+            raise SystemExit(
+                f"[error] Could not read your playlists: {e}\n"
+                "Your cookies are probably expired: export them again (README, step 2)."
+            )
+
+    playlists: dict[str, Playlist] = {}
+    for entry in (info or {}).get("entries") or []:
+        if not entry:
+            continue
+        url = entry.get("url") or ""
+        pl_id = playlist_id_from_url(url) or (
+            entry.get("id") if entry.get("ie_key") == "YoutubeTab" else None
+        )
+        if not pl_id:
+            continue  # not a playlist (e.g. a stray video in the feed)
+        playlists[pl_id] = Playlist(
+            id=pl_id, title=entry.get("title") or pl_id, url=playlist_url(pl_id)
+        )
+
+    if not playlists:
+        print(
+            "[warning] Your library returned no playlists. Either you have none, or the "
+            "cookies are not logged in / expired (README, step 2)."
+        )
+
+    if settings.include_liked and LIKED_PLAYLIST_ID not in playlists:
+        playlists[LIKED_PLAYLIST_ID] = Playlist(
+            id=LIKED_PLAYLIST_ID, title="Liked videos", url=playlist_url(LIKED_PLAYLIST_ID)
+        )
+    for extra in settings.extra_playlists:
+        pl_id = playlist_id_from_url(playlist_url(extra)) or extra
+        playlists.setdefault(pl_id, Playlist(id=pl_id, title=pl_id, url=playlist_url(extra)))
+
+    selected = list(playlists.values())
+    if settings.include_playlists:
+        selected = [p for p in selected if p.id in settings.include_playlists]
+    return [p for p in selected if p.id not in settings.exclude_playlists]
+
+
+def fetch_tracks(settings: Settings, playlist: Playlist) -> Playlist:
+    """Fill playlist.tracks (flat entries, no download). Errors are stored, not raised."""
+    with yt_dlp.YoutubeDL(_flat_opts(settings)) as ydl:
+        try:
+            info = ydl.extract_info(playlist.url, download=False)
+        except yt_dlp.utils.DownloadError as e:
+            playlist.error = str(e)
+            return playlist
+    info = info or {}
+    if playlist.title == playlist.id and info.get("title"):
+        playlist.title = info["title"]  # extra playlists only have their id as title
+    playlist.tracks = [e for e in info.get("entries") or [] if e and e.get("id")]
+    return playlist

@@ -28,14 +28,33 @@ def _int(name: str, default: int) -> int:
         raise SystemExit(f"[config] {name} must be an integer, got '{raw}'")
 
 
+def _bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name, "").strip().lower()
+    if not raw:
+        return default
+    return raw in ("1", "true", "yes", "y", "on")
+
+
+def _list(name: str, default: str = "") -> tuple[str, ...]:
+    """Comma-separated list, e.g. "PLabc, PLdef" -> ("PLabc", "PLdef")."""
+    raw = os.getenv(name)
+    raw = default if raw is None else raw
+    return tuple(item.strip() for item in raw.split(",") if item.strip())
+
+
 @dataclass(frozen=True)
 class Settings:
     download_dir: Path
+    cookies_path: Path  # configured location, may not exist yet
     cookies_file: Path | None  # None when the file does not exist
     audio_quality: int
     sleep_min: int
     sleep_max: int
     ffmpeg_location: str | None
+    include_liked: bool
+    include_playlists: tuple[str, ...]  # if not empty, ONLY these playlist ids are used
+    exclude_playlists: tuple[str, ...]
+    extra_playlists: tuple[str, ...]  # playlist ids or URLs not in your library
 
 
 def load_settings() -> Settings:
@@ -44,9 +63,14 @@ def load_settings() -> Settings:
     sleep_max = max(_int("SLEEP_MAX", 6), sleep_min)
     return Settings(
         download_dir=_path(os.getenv("DOWNLOAD_DIR", "./downloads").strip() or "./downloads"),
+        cookies_path=cookies,
         cookies_file=cookies if cookies.is_file() else None,
         audio_quality=_int("AUDIO_QUALITY", 192),
         sleep_min=sleep_min,
         sleep_max=sleep_max,
         ffmpeg_location=os.getenv("FFMPEG_LOCATION", "").strip() or None,
+        include_liked=_bool("INCLUDE_LIKED", True),
+        include_playlists=_list("INCLUDE_PLAYLISTS"),
+        exclude_playlists=_list("EXCLUDE_PLAYLISTS", "WL"),  # WL = Watch later
+        extra_playlists=_list("EXTRA_PLAYLISTS"),
     )
